@@ -1,0 +1,71 @@
+import asyncio
+import aiosqlite
+from datetime import datetime
+from aiogram import Bot, Dispatcher
+from aiogram.types import Message
+from aiogram.filters import Command
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+TOKEN = 8416616471:AAFnZ_U4yFTU9DufySpMYxPtrvj2tlJEER4
+
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+scheduler = AsyncIOScheduler()
+
+async def init_db():
+    async with aiosqlite.connect("data.db") as db:
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            channel_id TEXT,
+            message_id INTEGER,
+            template TEXT
+        )
+        """)
+        await db.commit()
+
+def render(template):
+    today = datetime.now().strftime("%Y-%m-%d")
+    return template.replace("{date}", today)
+
+async def update_messages():
+    async with aiosqlite.connect("data.db") as db:
+        async with db.execute("SELECT channel_id, message_id, template FROM messages") as cursor:
+            rows = await cursor.fetchall()
+            for channel_id, message_id, template in rows:
+                try:
+                    await bot.edit_message_text(
+                        chat_id=channel_id,
+                        message_id=message_id,
+                        text=render(template)
+                    )
+                except:
+                    pass
+
+@dp.message(Command("add"))
+async def add_message(message: Message):
+    parts = message.text.split(maxsplit=3)
+    if len(parts) < 4:
+        await message.answer("استخدم:\n/add channel message_id النص")
+        return
+
+    channel = parts[1]
+    msg_id = int(parts[2])
+    template = parts[3]
+
+    async with aiosqlite.connect("data.db") as db:
+        await db.execute(
+            "INSERT INTO messages VALUES (?, ?, ?)",
+            (channel, msg_id, template)
+        )
+        await db.commit()
+
+    await message.answer("تم الحفظ ✅")
+
+async def main():
+    await init_db()
+    scheduler.add_job(update_messages, "interval", hours=24)
+    scheduler.start()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
